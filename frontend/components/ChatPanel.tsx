@@ -114,7 +114,7 @@ export default function ChatPanel({ complaintId }: ChatPanelProps) {
                   {msg.message}
                 </div>
                 <span className="text-[10px] text-muted-foreground mt-1 px-1">
-                  {msg.sender_role === "student" ? "Student" : "Staff"} ·{" "}
+                  {msg.sender_role === "student" ? "Student" : msg.sender_role === "admin" ? "Admin" : "Staff"} ·{" "}
                   {new Date(msg.sent_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                 </span>
               </div>

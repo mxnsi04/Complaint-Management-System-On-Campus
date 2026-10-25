@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
@@ -24,7 +24,7 @@ interface ComplaintItem {
 export default function DashboardPage() {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
-  
+
   const [complaints, setComplaints] = useState<ComplaintItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -40,13 +40,18 @@ export default function DashboardPage() {
       if (!user) return;
       try {
         setLoading(true);
-        let endpoint = "/complaints";
+
+        let endpoint = "/complaints"; // admin sees all
+
         if (user.role === "student") {
+          // Students see only their own complaints
           endpoint = `/students/${user.id}/complaints`;
+        } else if (user.role === "staff") {
+          // Staff see only complaints assigned to them
+          endpoint = `/staff/${user.id}/complaints`;
         }
-        
+
         const { data } = await api.get(endpoint);
-        // Depending on backend, data might be an array or { data: [] }
         setComplaints(Array.isArray(data) ? data : data.data || []);
       } catch (err) {
         console.error("Failed to load complaints:", err);
@@ -66,16 +71,13 @@ export default function DashboardPage() {
     );
   }
 
-  const filteredComplaints = complaints.filter((c) => 
-    c.title?.toLowerCase().includes(search.toLowerCase()) || 
+  const filteredComplaints = complaints.filter((c) =>
+    c.title?.toLowerCase().includes(search.toLowerCase()) ||
     c.complaint_id?.toString().includes(search)
   );
 
   const formatComplaintDate = (dateValue?: string) => {
-    if (!dateValue) {
-      return "Date unavailable";
-    }
-
+    if (!dateValue) return "Date unavailable";
     return new Date(dateValue).toLocaleDateString();
   };
 
@@ -83,8 +85,16 @@ export default function DashboardPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-          <p className="mt-1 text-muted-foreground">Manage and track campus complaints.</p>
+          <h1 className="text-3xl font-bold tracking-tight">
+            {user?.role === "admin" ? "All Complaints" : user?.role === "staff" ? "My Assigned Complaints" : "My Complaints"}
+          </h1>
+          <p className="mt-1 text-muted-foreground">
+            {user?.role === "admin"
+              ? "Manage and track all campus complaints."
+              : user?.role === "staff"
+              ? "Complaints assigned to you."
+              : "Your submitted complaints."}
+          </p>
         </div>
         {user?.role === "student" && (
           <Link href="/complaints/new">
@@ -99,8 +109,8 @@ export default function DashboardPage() {
       <div className="flex gap-4 items-center">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input 
-            placeholder="Search complaints..." 
+          <Input
+            placeholder="Search complaints..."
             className="pl-9"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -140,11 +150,11 @@ export default function DashboardPage() {
                       </CardDescription>
                     </div>
                     <div className="flex gap-2 flex-wrap justify-end">
-                      <Badge variant={getPriorityBadgeVariant(complaint.priority || 'low')}>
-                        {formatStatus(complaint.priority || 'low')}
+                      <Badge variant={getPriorityBadgeVariant(complaint.priority || "low")}>
+                        {formatStatus(complaint.priority || "low")}
                       </Badge>
-                      <Badge variant={getStatusBadgeVariant(complaint.status || 'pending')}>
-                        {formatStatus(complaint.status || 'pending')}
+                      <Badge variant={getStatusBadgeVariant(complaint.status || "pending")}>
+                        {formatStatus(complaint.status || "pending")}
                       </Badge>
                     </div>
                   </div>
@@ -157,4 +167,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-
