@@ -8,18 +8,28 @@ export const createFeedback = asyncHandler(async (req, res) => {
     return res.status(400).json({ message: 'complaint_id, student_id, and rating are required' });
   }
 
-  if (Number(rating) < 1 || Number(rating) > 5) {
+  const numericRating = Number(rating);
+
+  if (numericRating < 1 || numericRating > 5) {
     return res.status(400).json({ message: 'rating must be between 1 and 5' });
   }
 
   const result = await query(
     'INSERT INTO feedback (message, rating, complaint_id, student_id) VALUES (?, ?, ?, ?)',
-    [message, rating, complaint_id, student_id]
+    [message, numericRating, complaint_id, student_id]
   );
 
+  // --- Workflow 2: Feedback Loop Auto-Reopen ---
+  // The DB trigger (trg_reopen_on_low_feedback) handles the actual reopen + audit.
+  // Here we just reflect in the response whether a reopen was triggered.
+  const reopened = numericRating < 2;
+
   return res.status(201).json({
-    message: 'Feedback submitted',
-    feedback_id: result.insertId
+    message: reopened
+      ? 'Feedback submitted. Complaint has been automatically reopened due to low rating.'
+      : 'Feedback submitted',
+    feedback_id: result.insertId,
+    auto_reopened: reopened
   });
 });
 

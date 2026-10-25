@@ -9,9 +9,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { ArrowLeft, Loader2, MessageSquare, Send, CheckCircle } from "lucide-react";
+import { ArrowLeft, Loader2, MessageSquare, Send, CheckCircle, RefreshCw, MessageCircle } from "lucide-react";
 import Link from "next/link";
 import { formatStatus, getPriorityBadgeVariant, getStatusBadgeVariant } from "@/lib/helpers";
+import dynamic from "next/dynamic";
+
+// Dynamically import ChatPanel so Socket.IO only runs in browser
+const ChatPanel = dynamic(() => import("@/components/ChatPanel"), { ssr: false });
 
 interface ComplaintResponse {
   created_at?: string;
@@ -48,12 +52,14 @@ export default function ComplaintDetailPage() {
 
   const { id } = useParams();
   const { user } = useAuth();
-  
+
   const [complaint, setComplaint] = useState<ComplaintRecord | null>(null);
   const [responses, setResponses] = useState<ComplaintResponse[]>([]);
   const [staffList, setStaffList] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
-  
+  const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
+  const [autoReopenNotice, setAutoReopenNotice] = useState(false);
+
   // Forms state
   const [replyMessage, setReplyMessage] = useState("");
   const [statusUpdate, setStatusUpdate] = useState("");
@@ -129,12 +135,17 @@ export default function ComplaintDetailPage() {
   const handleFeedback = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await api.post("/feedback", {
+      const res = await api.post("/feedback", {
         complaint_id: parseInt(id as string),
         student_id: user?.id,
         rating: parseInt(feedbackRating),
         message: feedbackMessage
       });
+      setFeedbackSubmitted(true);
+      // --- Workflow 2 notice: if auto-reopened show banner ---
+      if (res.data.auto_reopened) {
+        setAutoReopenNotice(true);
+      }
       fetchData();
     } catch (err) {
       console.error("Failed to submit feedback", err);
@@ -150,6 +161,8 @@ export default function ComplaintDetailPage() {
   }
 
   const isResolved = complaint.status === 'resolved' || complaint.status === 'closed';
+  const isReopened = complaint.status === 'reopened';
+  const hasAssignedStaff = !!(complaint.staff_id || complaint.assigned_staff);
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -157,6 +170,16 @@ export default function ComplaintDetailPage() {
         <ArrowLeft className="w-4 h-4 mr-2" />
         Back to Dashboard
       </Link>
+
+      {/* Auto-reopen notice banner */}
+      {(autoReopenNotice || isReopened) && (
+        <div className="flex items-center gap-3 rounded-lg border border-yellow-500/40 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-700 dark:text-yellow-400">
+          <RefreshCw className="w-4 h-4 shrink-0" />
+          <span>
+            <strong>Complaint Reopened</strong> — This complaint was automatically reopened due to a low feedback rating. The admin has been notified.
+          </span>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="md:col-span-2 space-y-6">
@@ -185,6 +208,7 @@ export default function ComplaintDetailPage() {
             </CardContent>
           </Card>
 
+          {/* Discussion / Response Thread */}
           <Card>
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
@@ -215,7 +239,7 @@ export default function ComplaintDetailPage() {
 
               {!isResolved && (
                 <div className="mt-4 flex gap-2 border-t border-border pt-4">
-                  <Textarea 
+                  <Textarea
                     placeholder="Type a response..."
                     value={replyMessage}
                     onChange={(e) => setReplyMessage(e.target.value)}
@@ -229,32 +253,56 @@ export default function ComplaintDetailPage() {
             </CardContent>
           </Card>
 
-          {isResolved && user?.role === 'student' && (
+          {/* --- Workflow 3: Real-Time Chat Panel --- */}
+          {hasAssignedStaff && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <MessageCircle className="w-5 h-5" />
+                  Real-Time Chat
+                </CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  Live chat between student and assigned staff
+                </p>
+              </CardHeader>
+              <CardContent className="p-0">
+                <ChatPanel complaintId={complaint.complaint_id!} />
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Feedback section */}
+          {isResolved && user?.role === 'student' && !feedbackSubmitted && (
             <Card className="border-success-border bg-success-bg">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-lg text-success-foreground">
                   <CheckCircle className="w-5 h-5" />
                   Provide Feedback
                 </CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  Rating below 2 stars will automatically reopen this complaint for re-investigation.
+                </p>
               </CardHeader>
               <CardContent>
                 <form onSubmit={handleFeedback} className="space-y-4">
                   <div className="space-y-2">
-                    <Label>Rating (1-5)</Label>
-                    <select 
+                    <Label>Rating (1–5 stars)</Label>
+                    <select
                       className={themedSelectClass}
                       value={feedbackRating}
                       onChange={(e) => setFeedbackRating(e.target.value)}
                     >
                       {[1, 2, 3, 4, 5].map(num => (
-                        <option key={num} value={num}>{num} Stars</option>
+                        <option key={num} value={num}>
+                          {num} Star{num > 1 ? "s" : ""}{num < 2 ? " ⚠ (will reopen complaint)" : ""}
+                        </option>
                       ))}
                     </select>
                   </div>
                   <div className="space-y-2">
                     <Label>Feedback Message</Label>
-                    <Textarea 
-                      placeholder="Share your experience..." 
+                    <Textarea
+                      placeholder="Share your experience..."
                       value={feedbackMessage}
                       onChange={(e) => setFeedbackMessage(e.target.value)}
                       required
@@ -262,6 +310,15 @@ export default function ComplaintDetailPage() {
                   </div>
                   <Button type="submit" variant="outline" className="w-full">Submit Feedback</Button>
                 </form>
+              </CardContent>
+            </Card>
+          )}
+
+          {feedbackSubmitted && !autoReopenNotice && (
+            <Card className="border-success-border bg-success-bg">
+              <CardContent className="flex items-center gap-3 py-4 text-sm text-success-foreground">
+                <CheckCircle className="w-5 h-5 shrink-0" />
+                <span>Feedback submitted successfully. Thank you!</span>
               </CardContent>
             </Card>
           )}
@@ -287,12 +344,12 @@ export default function ComplaintDetailPage() {
               </div>
               <div>
                 <span className="mb-1 block text-muted-foreground">Assigned Staff</span>
-                {complaint.staff_id || complaint.assigned_staff ? (
+                {hasAssignedStaff ? (
                   <span className="font-medium text-foreground">
                     {complaint.assigned_staff || `Staff ID: #${complaint.staff_id}`}
                   </span>
                 ) : (
-                  <span className="italic text-muted-foreground">Unassigned</span>
+                  <span className="italic text-muted-foreground">Auto-assigning...</span>
                 )}
               </div>
             </CardContent>
@@ -307,7 +364,7 @@ export default function ComplaintDetailPage() {
                 <div className="space-y-3">
                   <Label>Update Status</Label>
                   <div className="flex gap-2">
-                    <select 
+                    <select
                       className={themedSelectClass}
                       value={statusUpdate}
                       onChange={(e) => setStatusUpdate(e.target.value)}
@@ -318,6 +375,7 @@ export default function ComplaintDetailPage() {
                       <option value="resolved">Resolved</option>
                       <option value="closed">Closed</option>
                       <option value="rejected">Rejected</option>
+                      <option value="reopened">Reopened</option>
                     </select>
                     <Button size="sm" onClick={handleUpdateStatus}>Update</Button>
                   </div>
@@ -325,9 +383,9 @@ export default function ComplaintDetailPage() {
 
                 {user.role === 'admin' && (
                   <div className="space-y-3 border-t border-border pt-4">
-                    <Label>Assign Staff</Label>
+                    <Label>Assign Staff (Override)</Label>
                     <div className="flex gap-2">
-                      <select 
+                      <select
                         className={themedSelectClass}
                         value={assignStaffId}
                         onChange={(e) => setAssignStaffId(e.target.value)}

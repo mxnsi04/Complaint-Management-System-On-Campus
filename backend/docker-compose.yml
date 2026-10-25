@@ -1,14 +1,13 @@
-
-
 services:
   db:
-    image: mysql
+    image: mysql:8
     container_name: campus-complaints-db
     restart: always
     ports:
       - "3307:3306"
     environment:
-      MYSQL_ROOT_PASSWORD: example
+      # Set this to your chosen root password — must match DB_PASSWORD in backend/.env
+      MYSQL_ROOT_PASSWORD: your_mysql_root_password
       MYSQL_DATABASE: campus_complaints
     volumes:
       - mysql_data:/var/lib/mysql

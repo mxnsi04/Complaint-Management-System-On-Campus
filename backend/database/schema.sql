@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS complaint (
     complaint_id  INT           AUTO_INCREMENT PRIMARY KEY,
     title         VARCHAR(200)  NOT NULL,
     description   TEXT          NOT NULL,
-    status        ENUM('pending','open','in_progress','resolved','closed','rejected')
+    status        ENUM('pending','open','in_progress','resolved','closed','rejected','reopened')
                                 DEFAULT 'pending',
     priority      ENUM('low','medium','high','critical')
                                 DEFAULT 'medium',
@@ -85,6 +85,17 @@ CREATE TABLE IF NOT EXISTS complaint_audit (
     old_status     VARCHAR(50),
     new_status     VARCHAR(50),
     changed_at     DATETIME  DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Workflow 3: Real-Time Chat
+CREATE TABLE IF NOT EXISTS chat_message (
+    message_id    INT           AUTO_INCREMENT PRIMARY KEY,
+    complaint_id  INT           NOT NULL,
+    sender_id     INT           NOT NULL,
+    sender_role   ENUM('student','staff','admin') NOT NULL,
+    message       TEXT          NOT NULL,
+    sent_at       DATETIME      DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_chat_complaint FOREIGN KEY (complaint_id) REFERENCES complaint(complaint_id) ON DELETE CASCADE
 );
 
 CREATE OR REPLACE VIEW vw_open_complaints AS
@@ -153,6 +164,7 @@ DROP TRIGGER IF EXISTS trg_set_resolved_date;
 DROP TRIGGER IF EXISTS trg_feedback_only_on_resolved;
 DROP TRIGGER IF EXISTS trg_audit_status_change;
 DROP TRIGGER IF EXISTS trg_auto_open_on_assign;
+DROP TRIGGER IF EXISTS trg_reopen_on_low_feedback;
 
 DELIMITER $$
 
@@ -201,6 +213,18 @@ BEGIN
     IF NEW.staff_id IS NOT NULL AND OLD.staff_id IS NULL
        AND NEW.status = 'pending' THEN
         SET NEW.status = 'open';
+    END IF;
+END$$
+
+-- Workflow 2: Feedback Loop - Auto-Reopen on rating < 2
+CREATE TRIGGER trg_reopen_on_low_feedback
+AFTER INSERT ON feedback
+FOR EACH ROW
+BEGIN
+    IF NEW.rating < 2 THEN
+        UPDATE complaint SET status = 'reopened' WHERE complaint_id = NEW.complaint_id;
+        INSERT INTO complaint_audit (complaint_id, old_status, new_status)
+        VALUES (NEW.complaint_id, 'resolved', 'reopened');
     END IF;
 END$$
 

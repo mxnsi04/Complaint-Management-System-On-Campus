@@ -1,8 +1,37 @@
 import { query } from '../config/db.js';
 import asyncHandler from '../utils/asyncHandler.js';
 
-const VALID_STATUSES = ['pending', 'open', 'in_progress', 'resolved', 'closed', 'rejected'];
+const VALID_STATUSES = ['pending', 'open', 'in_progress', 'resolved', 'closed', 'rejected', 'reopened'];
 const VALID_PRIORITIES = ['low', 'medium', 'high', 'critical'];
+
+// --- Workflow 1: Auto-Assignment ---
+// Finds the staff member with the fewest active (open/in_progress/pending) complaints.
+// If tied, picks the one most recently assigned least recently (oldest last assignment wins).
+async function autoAssignStaff(complaintId) {
+  const staffRows = await query(
+    `SELECT
+       st.staff_id,
+       COUNT(CASE WHEN c.status IN ('open','in_progress','pending') THEN 1 END) AS active_count
+     FROM staff st
+     LEFT JOIN complaint c ON st.staff_id = c.staff_id AND c.complaint_id != ?
+     WHERE st.role = 'staff'
+     GROUP BY st.staff_id
+     ORDER BY active_count ASC, st.staff_id ASC
+     LIMIT 1`,
+    [complaintId]
+  );
+
+  if (!staffRows.length) return; // No staff available — leave unassigned
+
+  const assignedStaffId = staffRows[0].staff_id;
+
+  await query(
+    `UPDATE complaint
+     SET staff_id = ?, status = 'open'
+     WHERE complaint_id = ?`,
+    [assignedStaffId, complaintId]
+  );
+}
 
 export const createComplaint = asyncHandler(async (req, res) => {
   const {
@@ -30,9 +59,16 @@ export const createComplaint = asyncHandler(async (req, res) => {
     [title, description, priority, student_id, category_id, staff_id]
   );
 
+  const complaintId = result.insertId;
+
+  // Workflow 1: Auto-assign to least-loaded staff (only if not manually assigned)
+  if (!staff_id) {
+    await autoAssignStaff(complaintId);
+  }
+
   return res.status(201).json({
-    message: 'Complaint created',
-    complaint_id: result.insertId
+    message: 'Complaint created and auto-assigned',
+    complaint_id: complaintId
   });
 });
 

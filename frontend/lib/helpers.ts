@@ -5,6 +5,8 @@ export const getStatusBadgeVariant = (status: string) => {
       return 'success';
     case 'in_progress':
       return 'warning';
+    case 'reopened':
+      return 'warning';
     case 'rejected':
       return 'destructive';
     default:
