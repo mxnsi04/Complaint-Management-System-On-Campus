@@ -1,5 +1,6 @@
 import { query } from '../config/db.js';
 import asyncHandler from '../utils/asyncHandler.js';
+import { getIo } from '../socket.js';
 
 export const createFeedback = asyncHandler(async (req, res) => {
   const { complaint_id, student_id, rating, message = null } = req.body;
@@ -19,16 +20,32 @@ export const createFeedback = asyncHandler(async (req, res) => {
     [message, numericRating, complaint_id, student_id]
   );
 
+  const feedbackId = result.insertId;
+
   // --- Workflow 2: Feedback Loop Auto-Reopen ---
-  // The DB trigger (trg_reopen_on_low_feedback) handles the actual reopen + audit.
-  // Here we just reflect in the response whether a reopen was triggered.
+  // The DB trigger (trg_reopen_on_low_feedback) fires AFTER INSERT and:
+  //   - Sets complaint status → 'reopened'
+  //   - Writes to complaint_audit
   const reopened = numericRating < 2;
+
+  if (reopened) {
+    // Delete this feedback record so the student can submit fresh feedback
+    // after the complaint is resolved again. The UNIQUE constraint on complaint_id
+    // would otherwise block re-submission.
+    await query('DELETE FROM feedback WHERE feedback_id = ?', [feedbackId]);
+
+    // Broadcast status change to all viewers so staff/student pages update instantly
+    getIo()?.to(`complaint_${complaint_id}`).emit('complaint_updated', {
+      complaint_id: Number(complaint_id),
+      status: 'reopened'
+    });
+  }
 
   return res.status(201).json({
     message: reopened
       ? 'Feedback submitted. Complaint has been automatically reopened due to low rating.'
       : 'Feedback submitted',
-    feedback_id: result.insertId,
+    feedback_id: feedbackId,
     auto_reopened: reopened
   });
 });
