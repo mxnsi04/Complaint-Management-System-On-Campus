@@ -1,5 +1,6 @@
 import { query } from '../config/db.js';
 import asyncHandler from '../utils/asyncHandler.js';
+import { getIo } from '../socket.js';
 
 const VALID_STATUSES = ['pending', 'open', 'in_progress', 'resolved', 'closed', 'rejected', 'reopened'];
 const VALID_PRIORITIES = ['low', 'medium', 'high', 'critical'];
@@ -272,6 +273,11 @@ export const updateComplaint = asyncHandler(async (req, res) => {
     return res.status(404).json({ message: 'Complaint not found' });
   }
 
+  // Broadcast status change to all users viewing this complaint
+  if (status !== undefined) {
+    getIo()?.to(`complaint_${complaintId}`).emit('complaint_updated', { complaint_id: complaintId, status });
+  }
+
   return res.json({ message: 'Complaint updated' });
 });
 
@@ -313,6 +319,12 @@ export const assignComplaint = asyncHandler(async (req, res) => {
   if (!result.affectedRows) {
     return res.status(404).json({ message: 'Complaint not found' });
   }
+
+  // Broadcast assignment change to all users viewing this complaint
+  getIo()?.to(`complaint_${complaintId}`).emit('complaint_updated', {
+    complaint_id: complaintId,
+    staff_id: normalizedStaffId
+  });
 
   return res.json({
     message: normalizedStaffId ? 'Complaint assigned successfully' : 'Complaint unassigned successfully'

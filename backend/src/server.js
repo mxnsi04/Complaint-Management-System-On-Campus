@@ -4,28 +4,32 @@ import app from './app.js';
 import env from './config/env.js';
 import { testConnection } from './config/db.js';
 import { query } from './config/db.js';
+import { setIo } from './socket.js';
 
 const httpServer = http.createServer(app);
 
-export const io = new Server(httpServer, {
+const io = new Server(httpServer, {
   cors: {
     origin: '*',
     methods: ['GET', 'POST']
   }
 });
 
+// Register io singleton so controllers can emit events
+setIo(io);
+
 io.on('connection', (socket) => {
-  // Join a complaint room
+  // Join a complaint chat room
   socket.on('join_complaint', (complaintId) => {
     socket.join(`complaint_${complaintId}`);
   });
 
-  // Leave a complaint room
+  // Leave a complaint chat room
   socket.on('leave_complaint', (complaintId) => {
     socket.leave(`complaint_${complaintId}`);
   });
 
-  // Send a chat message
+  // Real-time chat message
   socket.on('send_message', async (data) => {
     const { complaint_id, sender_id, sender_role, message } = data;
     try {
@@ -37,7 +41,6 @@ io.on('connection', (socket) => {
         'SELECT * FROM chat_message WHERE message_id = ?',
         [result.insertId]
       );
-      // Broadcast to everyone in the complaint room
       io.to(`complaint_${complaint_id}`).emit('receive_message', saved);
     } catch (err) {
       socket.emit('error', { message: 'Failed to send message' });
